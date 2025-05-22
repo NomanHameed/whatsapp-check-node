@@ -1,11 +1,12 @@
 {
   "name": "whatsapp-custom",
   "version": "1.0.0",
-  "description": "",
+  "description": "WhatsApp Custom Application",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
+    "build": "echo 'No build step required'",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -30,6 +31,7 @@
     "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
   }
 }
