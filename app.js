@@ -209,7 +209,7 @@ async function processExcelFile(filePath) {
     if (data.length > 0) {
       // Get the first key which should be the column name for phone numbers
       const firstKey = Object.keys(data[0])[0];
-      phoneNumbers = data.map(row => String(row[firstKey]).trim());
+      phoneNumbers = data.map(row => String(row[firstKey]).trim()).filter(num => num && num !== '');
     }
     
     currentJobStatus.total = phoneNumbers.length;
@@ -219,16 +219,12 @@ async function processExcelFile(filePath) {
     const resultWorkbook = xlsx.utils.book_new();
     const resultsData = [];
     
-    // Process phone numbers
-    for (const phoneNumber of phoneNumbers) {
-      // Skip empty phone numbers
-      if (!phoneNumber) {
-        currentJobStatus.processed++;
-        currentJobStatus.failed++;
-        continue;
-      }
+    // Process phone numbers with real-time updates
+    for (let i = 0; i < phoneNumbers.length; i++) {
+      const phoneNumber = phoneNumbers[i];
       
-      console.log(`Processing phone number: ${phoneNumber}`);
+      console.log(`Processing phone number ${i + 1}/${phoneNumbers.length}: ${phoneNumber}`);
+      
       const result = await checkWhatsAppNumber(phoneNumber);
       
       resultsData.push({
@@ -239,12 +235,17 @@ async function processExcelFile(filePath) {
         'Profile Picture Path': result.profilePicPath || 'Not available'
       });
       
-      currentJobStatus.processed++;
-      if (result.isRegistered) {
+      // Update progress in real-time
+      currentJobStatus.processed = i + 1;
+      if (result.isRegistered === true) {
         currentJobStatus.success++;
       } else {
         currentJobStatus.failed++;
       }
+      
+      // Log progress
+      const progressPercent = Math.round((currentJobStatus.processed / currentJobStatus.total) * 100);
+      console.log(`Progress: ${progressPercent}% (${currentJobStatus.processed}/${currentJobStatus.total}) - Success: ${currentJobStatus.success}, Failed: ${currentJobStatus.failed}`);
       
       // Add a small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -260,6 +261,7 @@ async function processExcelFile(filePath) {
     xlsx.writeFile(resultWorkbook, resultFilePath);
     
     processingJob = false;
+    console.log('Processing completed successfully!');
     return { resultFilePath, resultFilename };
   } catch (error) {
     console.error('Error processing Excel file:', error);
@@ -274,7 +276,12 @@ app.get('/', (req, res) => {
 });
 
 app.get('/status', (req, res) => {
-    console.log('Status request - Client Ready:', isClientReady, 'QR Available:', !!latestQR);
+    console.log('Status request - Client Ready:', isClientReady, 'QR Available:', !!latestQR, 'Processing:', processingJob);
+    
+    // Log current job status for debugging
+    if (processingJob) {
+      console.log('Current job status:', currentJobStatus);
+    }
     
     res.json({
       clientReady: isClientReady,
@@ -298,11 +305,17 @@ app.post('/upload', upload.single('excelFile'), async (req, res) => {
   }
   
   try {
-    const result = await processExcelFile(req.file.path);
+    // Start processing in background and return immediately
+    processExcelFile(req.file.path).then(result => {
+      console.log('File processing completed:', result.resultFilename);
+    }).catch(error => {
+      console.error('File processing failed:', error);
+    });
+    
     res.json({
       success: true,
-      message: 'File processed successfully',
-      resultFile: `/results/${result.resultFilename}`
+      message: 'File processing started. Check the progress below.',
+      processing: true
     });
   } catch (error) {
     res.status(500).json({
@@ -310,6 +323,33 @@ app.post('/upload', upload.single('excelFile'), async (req, res) => {
       error: error.message
     });
   }
+});
+
+// New endpoint to get the download link when processing is complete
+app.get('/download-result', (req, res) => {
+  if (processingJob) {
+    return res.json({ processing: true });
+  }
+  
+  // Check if there's a completed result file
+  const resultFiles = fs.readdirSync(resultsDir).filter(file => file.endsWith('.xlsx'));
+  if (resultFiles.length > 0) {
+    // Get the most recent file
+    const latestFile = resultFiles
+      .map(file => ({
+        name: file,
+        time: fs.statSync(path.join(resultsDir, file)).mtime.getTime()
+      }))
+      .sort((a, b) => b.time - a.time)[0];
+    
+    return res.json({
+      processing: false,
+      completed: true,
+      downloadUrl: `/results/${latestFile.name}`
+    });
+  }
+  
+  res.json({ processing: false, completed: false });
 });
 
 app.get('/init-client', async (req, res) => {
@@ -398,7 +438,7 @@ const htmlContent = `<!DOCTYPE html>
       </div>
       <div class="card-body">
         <div class="progress mb-3">
-          <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+          <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
         </div>
         <div id="progressDetails" class="mb-2">
           Processed: 0 / 0 (Success: 0, Failed: 0)
@@ -432,7 +472,7 @@ if (!fs.existsSync(path.join(__dirname, 'public', 'index.html'))) {
   fs.writeFileSync(path.join(__dirname, 'public', 'index.html'), htmlContent);
 }
 
-// Write the app.js file
+// Write the updated app.js file
 const appJsContent = `// File: public/app.js
 let statusInterval;
 let qrCheckAttempts = 0;
@@ -486,19 +526,69 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     const data = await response.json();
     
     if(data.success) {
-      document.getElementById('resultMessage').textContent = data.message;
-      document.getElementById('downloadLink').href = data.resultFile;
-      document.getElementById('downloadLink').classList.remove('hidden');
-      document.getElementById('resultSection').classList.remove('hidden');
+      console.log('File upload successful, processing started');
+      // Start checking for progress updates
+      startProgressCheck();
     } else {
       alert('Error: ' + data.error);
       document.getElementById('uploadBtn').disabled = false;
+      document.getElementById('progressSection').classList.add('hidden');
     }
   } catch (error) {
     alert('Error: ' + error.message);
     document.getElementById('uploadBtn').disabled = false;
+    document.getElementById('progressSection').classList.add('hidden');
   }
 });
+
+// Progress check function
+async function checkProgress() {
+  try {
+    const response = await fetch('/download-result');
+    const data = await response.json();
+    
+    if (data.completed) {
+      // Processing completed
+      document.getElementById('resultMessage').textContent = 'File processed successfully!';
+      document.getElementById('downloadLink').href = data.downloadUrl;
+      document.getElementById('downloadLink').classList.remove('hidden');
+      document.getElementById('resultSection').classList.remove('hidden');
+      document.getElementById('uploadBtn').disabled = false;
+      
+      // Update progress bar to 100%
+      document.getElementById('progressBar').style.width = '100%';
+      document.getElementById('progressBar').setAttribute('aria-valuenow', 100);
+      document.getElementById('progressBar').textContent = '100%';
+      document.getElementById('progressBar').classList.remove('progress-bar-animated');
+      
+      // Stop checking progress
+      if (window.progressInterval) {
+        clearInterval(window.progressInterval);
+        window.progressInterval = null;
+      }
+      
+      return true; // Processing completed
+    }
+    
+    return false; // Still processing
+  } catch (error) {
+    console.error('Error checking progress:', error);
+    return false;
+  }
+}
+
+// Start progress check interval
+function startProgressCheck() {
+  if (!window.progressInterval) {
+    window.progressInterval = setInterval(async () => {
+      const completed = await checkProgress();
+      if (completed) {
+        clearInterval(window.progressInterval);
+        window.progressInterval = null;
+      }
+    }, 2000); // Check every 2 seconds
+  }
+}
 
 // Status check function
 async function checkStatus() {
@@ -566,9 +656,10 @@ async function checkStatus() {
     }
     
     // Update job status if processing
-    if(data.processingJob) {
-      const progress = data.jobStatus.total > 0 ? 
-        Math.round((data.jobStatus.processed / data.jobStatus.total) * 100) : 0;
+    if(data.processingJob && data.jobStatus.total > 0) {
+      const progress = Math.round((data.jobStatus.processed / data.jobStatus.total) * 100);
+      
+      console.log('Updating progress:', progress + '%', data.jobStatus);
       
       document.getElementById('progressBar').style.width = progress + '%';
       document.getElementById('progressBar').setAttribute('aria-valuenow', progress);
@@ -578,9 +669,6 @@ async function checkStatus() {
         \`Processed: \${data.jobStatus.processed} / \${data.jobStatus.total} (Success: \${data.jobStatus.success}, Failed: \${data.jobStatus.failed})\`;
       
       document.getElementById('progressSection').classList.remove('hidden');
-    } else if(data.jobStatus.processed > 0) {
-      // Job completed
-      document.getElementById('uploadBtn').disabled = false;
     }
   } catch (error) {
     console.error('Error checking status:', error);
@@ -599,6 +687,9 @@ function startStatusCheck() {
 window.addEventListener('beforeunload', () => {
   if(statusInterval) {
     clearInterval(statusInterval);
+  }
+  if(window.progressInterval) {
+    clearInterval(window.progressInterval);
   }
 });`;
 

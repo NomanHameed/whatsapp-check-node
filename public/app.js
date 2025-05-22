@@ -51,19 +51,69 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     const data = await response.json();
     
     if(data.success) {
-      document.getElementById('resultMessage').textContent = data.message;
-      document.getElementById('downloadLink').href = data.resultFile;
-      document.getElementById('downloadLink').classList.remove('hidden');
-      document.getElementById('resultSection').classList.remove('hidden');
+      console.log('File upload successful, processing started');
+      // Start checking for progress updates
+      startProgressCheck();
     } else {
       alert('Error: ' + data.error);
       document.getElementById('uploadBtn').disabled = false;
+      document.getElementById('progressSection').classList.add('hidden');
     }
   } catch (error) {
     alert('Error: ' + error.message);
     document.getElementById('uploadBtn').disabled = false;
+    document.getElementById('progressSection').classList.add('hidden');
   }
 });
+
+// Progress check function
+async function checkProgress() {
+  try {
+    const response = await fetch('/download-result');
+    const data = await response.json();
+    
+    if (data.completed) {
+      // Processing completed
+      document.getElementById('resultMessage').textContent = 'File processed successfully!';
+      document.getElementById('downloadLink').href = data.downloadUrl;
+      document.getElementById('downloadLink').classList.remove('hidden');
+      document.getElementById('resultSection').classList.remove('hidden');
+      document.getElementById('uploadBtn').disabled = false;
+      
+      // Update progress bar to 100%
+      document.getElementById('progressBar').style.width = '100%';
+      document.getElementById('progressBar').setAttribute('aria-valuenow', 100);
+      document.getElementById('progressBar').textContent = '100%';
+      document.getElementById('progressBar').classList.remove('progress-bar-animated');
+      
+      // Stop checking progress
+      if (window.progressInterval) {
+        clearInterval(window.progressInterval);
+        window.progressInterval = null;
+      }
+      
+      return true; // Processing completed
+    }
+    
+    return false; // Still processing
+  } catch (error) {
+    console.error('Error checking progress:', error);
+    return false;
+  }
+}
+
+// Start progress check interval
+function startProgressCheck() {
+  if (!window.progressInterval) {
+    window.progressInterval = setInterval(async () => {
+      const completed = await checkProgress();
+      if (completed) {
+        clearInterval(window.progressInterval);
+        window.progressInterval = null;
+      }
+    }, 2000); // Check every 2 seconds
+  }
+}
 
 // Status check function
 async function checkStatus() {
@@ -131,9 +181,10 @@ async function checkStatus() {
     }
     
     // Update job status if processing
-    if(data.processingJob) {
-      const progress = data.jobStatus.total > 0 ? 
-        Math.round((data.jobStatus.processed / data.jobStatus.total) * 100) : 0;
+    if(data.processingJob && data.jobStatus.total > 0) {
+      const progress = Math.round((data.jobStatus.processed / data.jobStatus.total) * 100);
+      
+      console.log('Updating progress:', progress + '%', data.jobStatus);
       
       document.getElementById('progressBar').style.width = progress + '%';
       document.getElementById('progressBar').setAttribute('aria-valuenow', progress);
@@ -143,9 +194,6 @@ async function checkStatus() {
         `Processed: ${data.jobStatus.processed} / ${data.jobStatus.total} (Success: ${data.jobStatus.success}, Failed: ${data.jobStatus.failed})`;
       
       document.getElementById('progressSection').classList.remove('hidden');
-    } else if(data.jobStatus.processed > 0) {
-      // Job completed
-      document.getElementById('uploadBtn').disabled = false;
     }
   } catch (error) {
     console.error('Error checking status:', error);
@@ -164,5 +212,8 @@ function startStatusCheck() {
 window.addEventListener('beforeunload', () => {
   if(statusInterval) {
     clearInterval(statusInterval);
+  }
+  if(window.progressInterval) {
+    clearInterval(window.progressInterval);
   }
 });
