@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: whatsapp-checker
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: true
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/google-chrome-stable
+    systemDependencies:
+      - name: google-chrome-stable
+      - name: fonts-liberation
+      - name: libappindicator3-1
+      - name: libasound2
+      - name: libatk-bridge2.0-0
+      - name: libdrm2
+      - name: libgtk-3-0
+      - name: libnspr4
+      - name: libnss3
+      - name: libx11-xcb1
+      - name: libxcomposite1
+      - name: libxdamage1
+      - name: libxrandr2
+      - name: xdg-utils
+      - name: libxss1
+      - name: libgconf-2-4
