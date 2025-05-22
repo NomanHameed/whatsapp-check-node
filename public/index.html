@@ -5,10 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WhatsApp Number Checker</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.0/build/qrcode.min.js"></script>
+  <!-- Try multiple QR code libraries for better compatibility -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.3/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
   <style>
     .hidden { display: none; }
-    #qrcode { width: 256px; height: 256px; margin: 0 auto; }
+    #qrcode { width: 256px; height: 256px; margin: 0 auto; display: flex; align-items: center; justify-content: center; border: 2px dashed #ddd; border-radius: 8px; }
+    #qrcode canvas, #qrcode img, #qrcode svg { max-width: 100%; max-height: 100%; }
     .progress { height: 25px; }
     .container { max-width: 800px; }
     .card { margin-bottom: 2rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
@@ -36,6 +39,9 @@
         <div id="qrSection" class="text-center mb-3 hidden">
           <p>Scan this QR code with your WhatsApp app:</p>
           <div id="qrcode"></div>
+          <div class="mt-2">
+            <small class="text-muted">QR code will refresh automatically. Keep this page open until connected.</small>
+          </div>
         </div>
         
         <button id="initClient" class="btn btn-primary">Initialize Client</button>
@@ -84,6 +90,254 @@
     </div>
   </div>
   
-  <script src="app.js"></script>
+  <!-- Load the fixed JavaScript -->
+  <script>
+    // File: public/app.js
+    let statusInterval;
+    let qrCheckAttempts = 0;
+    const MAX_QR_CHECK_ATTEMPTS = 30; // Try for about 60 seconds
+
+    // Initialize client
+    document.getElementById('initClient').addEventListener('click', async () => {
+      try {
+        document.getElementById('clientStatus').textContent = 'Client Status: Initializing...';
+        document.getElementById('initClient').disabled = true;
+        
+        const response = await fetch('/init-client');
+        const data = await response.json();
+        
+        if(data.success) {
+          console.log('Client initialization started');
+          startStatusCheck();
+        } else {
+          alert('Error initializing client: ' + data.error);
+          document.getElementById('initClient').disabled = false;
+        }
+      } catch (error) {
+        alert('Error: ' + error.message);
+        document.getElementById('initClient').disabled = false;
+      }
+    });
+
+    // Upload form
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const fileInput = document.getElementById('excelFile');
+      if(!fileInput.files[0]) {
+        alert('Please select an Excel file');
+        return;
+      }
+      
+      const formData = new FormData();
+      formData.append('excelFile', fileInput.files[0]);
+      
+      document.getElementById('uploadBtn').disabled = true;
+      document.getElementById('progressSection').classList.remove('hidden');
+      document.getElementById('resultSection').classList.add('hidden');
+      
+      try {
+        const response = await fetch('/upload', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const data = await response.json();
+        
+        if(data.success) {
+          document.getElementById('resultMessage').textContent = data.message;
+          document.getElementById('downloadLink').href = data.resultFile;
+          document.getElementById('downloadLink').classList.remove('hidden');
+          document.getElementById('resultSection').classList.remove('hidden');
+        } else {
+          alert('Error: ' + data.error);
+          document.getElementById('uploadBtn').disabled = false;
+        }
+      } catch (error) {
+        alert('Error: ' + error.message);
+        document.getElementById('uploadBtn').disabled = false;
+      }
+    });
+
+    // Status check function
+    async function checkStatus() {
+      try {
+        const response = await fetch('/status');
+        const data = await response.json();
+        
+        console.log('Status check:', data);
+        
+        // Update client status
+        const clientStatusElem = document.getElementById('clientStatus');
+        
+        if(data.clientReady) {
+          clientStatusElem.className = 'mb-3 text-success';
+          clientStatusElem.textContent = 'Client Status: Ready ✓';
+          document.getElementById('qrSection').classList.add('hidden');
+          document.getElementById('uploadBtn').disabled = false;
+          document.getElementById('initClient').disabled = true;
+          qrCheckAttempts = 0; // Reset counter
+          
+          // Stop checking once ready
+          if(statusInterval) {
+            clearInterval(statusInterval);
+            statusInterval = null;
+          }
+        } else if(data.qrCode) {
+          clientStatusElem.className = 'mb-3 text-warning';
+          clientStatusElem.textContent = 'Client Status: Please scan the QR code below';
+          console.log('QR code received, displaying...');
+          console.log('QR code length:', data.qrCode.length);
+          console.log('QR code preview:', data.qrCode.substring(0, 50) + '...');
+          
+          // Show QR code
+          document.getElementById('qrSection').classList.remove('hidden');
+          const qrCodeElement = document.getElementById('qrcode');
+          qrCodeElement.innerHTML = '';
+          
+          // Try multiple methods to generate QR code
+          let qrGenerated = false;
+          
+          // Method 1: Try using the main QRCode library
+          if (!qrGenerated && typeof QRCode !== 'undefined') {
+            try {
+              console.log('Trying QRCode library...');
+              
+              // Create a canvas element
+              const canvas = document.createElement('canvas');
+              
+              await new Promise((resolve, reject) => {
+                QRCode.toCanvas(canvas, data.qrCode, { 
+                  width: 240,
+                  height: 240,
+                  margin: 2,
+                  color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                  }
+                }, function(error) {
+                  if (error) {
+                    console.error('QRCode.toCanvas error:', error);
+                    reject(error);
+                  } else {
+                    console.log('QR code canvas generated successfully');
+                    qrCodeElement.appendChild(canvas);
+                    qrGenerated = true;
+                    resolve();
+                  }
+                });
+              });
+            } catch (error) {
+              console.log('Main QRCode library failed:', error);
+            }
+          }
+          
+          // Method 2: Try using qrcode-generator library
+          if (!qrGenerated && typeof qrcode !== 'undefined') {
+            try {
+              console.log('Trying qrcode-generator library...');
+              
+              const qr = qrcode(0, 'M');
+              qr.addData(data.qrCode);
+              qr.make();
+              
+              const qrSvg = qr.createSvgTag({
+                cellSize: 4,
+                margin: 4,
+                scalable: false
+              });
+              
+              qrCodeElement.innerHTML = qrSvg;
+              qrGenerated = true;
+              console.log('QR code generated with qrcode-generator library');
+            } catch (error) {
+              console.log('qrcode-generator library failed:', error);
+            }
+          }
+          
+          // Method 3: Fallback to manual QR code display
+          if (!qrGenerated) {
+            console.log('All QR code libraries failed, showing manual fallback');
+            qrCodeElement.innerHTML = `
+              <div class="alert alert-warning w-100">
+                <h6><i class="bi bi-exclamation-triangle"></i> Manual QR Code</h6>
+                <p class="mb-2">Please use a QR code scanner app to scan this code:</p>
+                <div class="border p-2 bg-light" style="font-family: monospace; font-size: 10px; word-break: break-all; max-height: 120px; overflow-y: auto;">
+                  ${data.qrCode}
+                </div>
+                <small class="text-muted mt-2 d-block">
+                  <strong>Alternative:</strong> Check the terminal/console where your server is running - a QR code should be displayed there as well.
+                </small>
+              </div>
+            `;
+          }
+          
+          qrCheckAttempts = 0; // Reset counter
+        } else {
+          clientStatusElem.className = 'mb-3 text-info';
+          clientStatusElem.textContent = 'Client Status: Waiting for QR code...';
+          qrCheckAttempts++;
+          
+          if (qrCheckAttempts > MAX_QR_CHECK_ATTEMPTS) {
+            clientStatusElem.className = 'mb-3 text-danger';
+            clientStatusElem.textContent = 'Client Status: Timeout. Please try again.';
+            document.getElementById('initClient').disabled = false;
+            clearInterval(statusInterval);
+            statusInterval = null;
+          }
+        }
+        
+        // Update job status if processing
+        if(data.processingJob) {
+          const progress = data.jobStatus.total > 0 ? 
+            Math.round((data.jobStatus.processed / data.jobStatus.total) * 100) : 0;
+          
+          document.getElementById('progressBar').style.width = progress + '%';
+          document.getElementById('progressBar').setAttribute('aria-valuenow', progress);
+          document.getElementById('progressBar').textContent = progress + '%';
+          
+          document.getElementById('progressDetails').textContent = 
+            `Processed: ${data.jobStatus.processed} / ${data.jobStatus.total} (Success: ${data.jobStatus.success}, Failed: ${data.jobStatus.failed})`;
+          
+          document.getElementById('progressSection').classList.remove('hidden');
+        } else if(data.jobStatus.processed > 0) {
+          // Job completed
+          document.getElementById('uploadBtn').disabled = false;
+        }
+      } catch (error) {
+        console.error('Error checking status:', error);
+      }
+    }
+
+    // Start status check interval
+    function startStatusCheck() {
+      if(!statusInterval) {
+        statusInterval = setInterval(checkStatus, 2000); // Check every 2 seconds
+        checkStatus(); // Immediate first check
+      }
+    }
+
+    // Stop status check interval on page unload
+    window.addEventListener('beforeunload', () => {
+      if(statusInterval) {
+        clearInterval(statusInterval);
+      }
+    });
+
+    // Check if QR code libraries are loaded properly when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('Page loaded. Checking QR code library availability:');
+      console.log('QRCode library available:', typeof QRCode !== 'undefined');
+      console.log('qrcode-generator library available:', typeof qrcode !== 'undefined');
+      
+      if (typeof QRCode !== 'undefined') {
+        console.log('QRCode methods available:', {
+          toCanvas: typeof QRCode.toCanvas === 'function',
+          toDataURL: typeof QRCode.toDataURL === 'function',
+          toString: typeof QRCode.toString === 'function'
+        });
+      }
+    });
+  </script>
 </body>
 </html>

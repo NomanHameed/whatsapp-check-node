@@ -72,8 +72,10 @@ function initializeClient() {
       });
   
       client.on('qr', (qr) => {
-        console.log('QR RECEIVED. Scan with your WhatsApp app:');
+        console.log('QR RECEIVED. QR code is now available for web interface.');
+        // Also show in terminal for backup
         qrcode.generate(qr, { small: true });
+        
         // Store the QR code for the frontend to access
         latestQR = qr;
         console.log('QR code updated and available for frontend');
@@ -82,12 +84,25 @@ function initializeClient() {
       client.on('ready', () => {
         console.log('WhatsApp client is ready!');
         isClientReady = true;
+        latestQR = null; // Clear QR code when ready
         resolve(true);
       });
   
-      client.on('disconnected', () => {
-        console.log('Client was disconnected');
+      client.on('authenticated', () => {
+        console.log('WhatsApp client authenticated!');
+        latestQR = null; // Clear QR code when authenticated
+      });
+  
+      client.on('disconnected', (reason) => {
+        console.log('Client was disconnected:', reason);
         isClientReady = false;
+        latestQR = null;
+      });
+
+      client.on('auth_failure', (msg) => {
+        console.error('Authentication failed:', msg);
+        latestQR = null;
+        reject(new Error('Authentication failed: ' + msg));
       });
   
       client.initialize().catch(err => {
@@ -95,8 +110,7 @@ function initializeClient() {
         reject(err);
       });
     });
-  }
-  
+}
 
 // Function to check if a number is registered on WhatsApp
 async function checkWhatsAppNumber(phoneNumber) {
@@ -260,7 +274,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/status', (req, res) => {
-    console.log('Status request, sending QR:', latestQR ? 'QR code available' : 'No QR code');
+    console.log('Status request - Client Ready:', isClientReady, 'QR Available:', !!latestQR);
     
     res.json({
       clientReady: isClientReady,
@@ -268,7 +282,7 @@ app.get('/status', (req, res) => {
       jobStatus: currentJobStatus,
       qrCode: latestQR
     });
-  });
+});
 
 app.post('/upload', upload.single('excelFile'), async (req, res) => {
   if (!req.file) {
@@ -300,12 +314,15 @@ app.post('/upload', upload.single('excelFile'), async (req, res) => {
 
 app.get('/init-client', async (req, res) => {
   if (isClientReady) {
-    return res.json({ success: true, message: 'Client is already initialized' });
+    return res.json({ success: true, message: 'Client is already initialized and ready' });
   }
   
   try {
-    await initializeClient();
-    res.json({ success: true, message: 'Client initialization started' });
+    // Don't await here, let it initialize in background
+    initializeClient().catch(err => {
+      console.error('Client initialization failed:', err);
+    });
+    res.json({ success: true, message: 'Client initialization started. Please wait for QR code...' });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -314,23 +331,283 @@ app.get('/init-client', async (req, res) => {
   }
 });
 
-// Read the fixed HTML content from file
-const htmlContent = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+// Create the HTML content if it doesn't exist
+const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Number Checker</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.0/build/qrcode.min.js"></script>
+  <style>
+    .hidden { display: none; }
+    #qrcode { width: 256px; height: 256px; margin: 0 auto; }
+    .progress { height: 25px; }
+    .container { max-width: 800px; }
+    .card { margin-bottom: 2rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .card-header { background-color: #f8f9fa; padding: 12px 20px; }
+    .btn-primary { background-color: #128C7E; border-color: #128C7E; }
+    .btn-primary:hover, .btn-primary:focus { background-color: #075E54; border-color: #075E54; }
+    .btn-success { background-color: #25D366; border-color: #25D366; }
+    .btn-success:hover, .btn-success:focus { background-color: #1da851; border-color: #1da851; }
+    .text-success { color: #25D366 !important; }
+    .progress-bar { background-color: #128C7E; }
+    body { background-color: #f5f5f5; }
+  </style>
+</head>
+<body>
+  <div class="container mt-5">
+    <h1 class="text-center mb-4">WhatsApp Number Checker</h1>
+    
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5>Step 1: Initialize WhatsApp Client</h5>
+      </div>
+      <div class="card-body">
+        <div id="clientStatus" class="mb-3">Client Status: Not Initialized</div>
+        
+        <div id="qrSection" class="text-center mb-3 hidden">
+          <p>Scan this QR code with your WhatsApp app:</p>
+          <div id="qrcode"></div>
+        </div>
+        
+        <button id="initClient" class="btn btn-primary">Initialize Client</button>
+      </div>
+    </div>
+    
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5>Step 2: Upload Excel File with Phone Numbers</h5>
+      </div>
+      <div class="card-body">
+        <form id="uploadForm">
+          <div class="mb-3">
+            <label for="excelFile" class="form-label">Excel File (First column should contain phone numbers)</label>
+            <input class="form-control" type="file" id="excelFile" name="excelFile" accept=".xlsx,.xls">
+            <div class="form-text mt-2">Note: Phone numbers should be in international format without any special characters (e.g., 12345678901).</div>
+          </div>
+          <button type="submit" class="btn btn-success" id="uploadBtn" disabled>Upload and Process</button>
+        </form>
+      </div>
+    </div>
+    
+    <div id="progressSection" class="card mb-4 hidden">
+      <div class="card-header">
+        <h5>Processing Status</h5>
+      </div>
+      <div class="card-body">
+        <div class="progress mb-3">
+          <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+        </div>
+        <div id="progressDetails" class="mb-2">
+          Processed: 0 / 0 (Success: 0, Failed: 0)
+        </div>
+        <div class="small text-muted">Processing may take some time. Please do not close this window.</div>
+      </div>
+    </div>
+    
+    <div id="resultSection" class="card mb-4 hidden">
+      <div class="card-header">
+        <h5>Results</h5>
+      </div>
+      <div class="card-body">
+        <p id="resultMessage"></p>
+        <a id="downloadLink" href="#" class="btn btn-primary hidden">Download Results</a>
+      </div>
+    </div>
+  </div>
+  
+  <script src="app.js"></script>
+</body>
+</html>`;
 
-// Create public directory and index.html file
+// Create public directory and files
 if (!fs.existsSync(path.join(__dirname, 'public'))) {
   fs.mkdirSync(path.join(__dirname, 'public'));
-  // Write the HTML content to the index.html file
+}
+
+// Only write HTML if it doesn't exist
+if (!fs.existsSync(path.join(__dirname, 'public', 'index.html'))) {
   fs.writeFileSync(path.join(__dirname, 'public', 'index.html'), htmlContent);
-} else {
-  // Ensure we're not overwriting an existing index.html every time
-  if (!fs.existsSync(path.join(__dirname, 'public', 'index.html'))) {
-    fs.writeFileSync(path.join(__dirname, 'public', 'index.html'), htmlContent);
+}
+
+// Write the app.js file
+const appJsContent = `// File: public/app.js
+let statusInterval;
+let qrCheckAttempts = 0;
+const MAX_QR_CHECK_ATTEMPTS = 30; // Try for about 60 seconds
+
+// Initialize client
+document.getElementById('initClient').addEventListener('click', async () => {
+  try {
+    document.getElementById('clientStatus').textContent = 'Client Status: Initializing...';
+    document.getElementById('initClient').disabled = true;
+    
+    const response = await fetch('/init-client');
+    const data = await response.json();
+    
+    if(data.success) {
+      console.log('Client initialization started');
+      startStatusCheck();
+    } else {
+      alert('Error initializing client: ' + data.error);
+      document.getElementById('initClient').disabled = false;
+    }
+  } catch (error) {
+    alert('Error: ' + error.message);
+    document.getElementById('initClient').disabled = false;
+  }
+});
+
+// Upload form
+document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const fileInput = document.getElementById('excelFile');
+  if(!fileInput.files[0]) {
+    alert('Please select an Excel file');
+    return;
+  }
+  
+  const formData = new FormData();
+  formData.append('excelFile', fileInput.files[0]);
+  
+  document.getElementById('uploadBtn').disabled = true;
+  document.getElementById('progressSection').classList.remove('hidden');
+  document.getElementById('resultSection').classList.add('hidden');
+  
+  try {
+    const response = await fetch('/upload', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const data = await response.json();
+    
+    if(data.success) {
+      document.getElementById('resultMessage').textContent = data.message;
+      document.getElementById('downloadLink').href = data.resultFile;
+      document.getElementById('downloadLink').classList.remove('hidden');
+      document.getElementById('resultSection').classList.remove('hidden');
+    } else {
+      alert('Error: ' + data.error);
+      document.getElementById('uploadBtn').disabled = false;
+    }
+  } catch (error) {
+    alert('Error: ' + error.message);
+    document.getElementById('uploadBtn').disabled = false;
+  }
+});
+
+// Status check function
+async function checkStatus() {
+  try {
+    const response = await fetch('/status');
+    const data = await response.json();
+    
+    console.log('Status check:', data);
+    
+    // Update client status
+    const clientStatusElem = document.getElementById('clientStatus');
+    
+    if(data.clientReady) {
+      clientStatusElem.className = 'mb-3 text-success';
+      clientStatusElem.textContent = 'Client Status: Ready ✓';
+      document.getElementById('qrSection').classList.add('hidden');
+      document.getElementById('uploadBtn').disabled = false;
+      document.getElementById('initClient').disabled = true;
+      qrCheckAttempts = 0; // Reset counter
+      
+      // Stop checking once ready
+      if(statusInterval) {
+        clearInterval(statusInterval);
+        statusInterval = null;
+      }
+    } else if(data.qrCode) {
+      clientStatusElem.className = 'mb-3 text-warning';
+      clientStatusElem.textContent = 'Client Status: Please scan the QR code below';
+      console.log('QR code received, displaying...');
+      
+      // Show QR code
+      document.getElementById('qrSection').classList.remove('hidden');
+      const qrCodeElement = document.getElementById('qrcode');
+      qrCodeElement.innerHTML = '';
+      
+      // Generate QR code
+      QRCode.toCanvas(qrCodeElement, data.qrCode, { 
+        width: 256,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      }, function(error) {
+        if (error) {
+          console.error('Error generating QR code:', error);
+          qrCodeElement.innerHTML = '<p class="text-danger">Error generating QR code</p>';
+        } else {
+          console.log('QR code displayed successfully');
+        }
+      });
+      qrCheckAttempts = 0; // Reset counter
+    } else {
+      clientStatusElem.className = 'mb-3 text-info';
+      clientStatusElem.textContent = 'Client Status: Waiting for QR code...';
+      qrCheckAttempts++;
+      
+      if (qrCheckAttempts > MAX_QR_CHECK_ATTEMPTS) {
+        clientStatusElem.className = 'mb-3 text-danger';
+        clientStatusElem.textContent = 'Client Status: Timeout. Please try again.';
+        document.getElementById('initClient').disabled = false;
+        clearInterval(statusInterval);
+        statusInterval = null;
+      }
+    }
+    
+    // Update job status if processing
+    if(data.processingJob) {
+      const progress = data.jobStatus.total > 0 ? 
+        Math.round((data.jobStatus.processed / data.jobStatus.total) * 100) : 0;
+      
+      document.getElementById('progressBar').style.width = progress + '%';
+      document.getElementById('progressBar').setAttribute('aria-valuenow', progress);
+      document.getElementById('progressBar').textContent = progress + '%';
+      
+      document.getElementById('progressDetails').textContent = 
+        \`Processed: \${data.jobStatus.processed} / \${data.jobStatus.total} (Success: \${data.jobStatus.success}, Failed: \${data.jobStatus.failed})\`;
+      
+      document.getElementById('progressSection').classList.remove('hidden');
+    } else if(data.jobStatus.processed > 0) {
+      // Job completed
+      document.getElementById('uploadBtn').disabled = false;
+    }
+  } catch (error) {
+    console.error('Error checking status:', error);
   }
 }
+
+// Start status check interval
+function startStatusCheck() {
+  if(!statusInterval) {
+    statusInterval = setInterval(checkStatus, 2000); // Check every 2 seconds
+    checkStatus(); // Immediate first check
+  }
+}
+
+// Stop status check interval on page unload
+window.addEventListener('beforeunload', () => {
+  if(statusInterval) {
+    clearInterval(statusInterval);
+  }
+});`;
+
+// Write the app.js file
+fs.writeFileSync(path.join(__dirname, 'public', 'app.js'), appJsContent);
 
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Access the WhatsApp Number Checker app in your browser`);
+  console.log(`The QR code will appear on the web interface when you click "Initialize Client"`);
 });

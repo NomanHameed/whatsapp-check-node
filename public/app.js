@@ -78,13 +78,20 @@ async function checkStatus() {
     
     if(data.clientReady) {
       clientStatusElem.className = 'mb-3 text-success';
-      clientStatusElem.textContent = 'Client Status: Ready';
+      clientStatusElem.textContent = 'Client Status: Ready ✓';
       document.getElementById('qrSection').classList.add('hidden');
       document.getElementById('uploadBtn').disabled = false;
       document.getElementById('initClient').disabled = true;
       qrCheckAttempts = 0; // Reset counter
+      
+      // Stop checking once ready
+      if(statusInterval) {
+        clearInterval(statusInterval);
+        statusInterval = null;
+      }
     } else if(data.qrCode) {
-      clientStatusElem.textContent = 'Client Status: Waiting for QR scan';
+      clientStatusElem.className = 'mb-3 text-warning';
+      clientStatusElem.textContent = 'Client Status: Please scan the QR code below';
       console.log('QR code received, displaying...');
       
       // Show QR code
@@ -93,7 +100,14 @@ async function checkStatus() {
       qrCodeElement.innerHTML = '';
       
       // Generate QR code
-      QRCode.toCanvas(qrCodeElement, data.qrCode, { width: 256 }, function(error) {
+      QRCode.toCanvas(qrCodeElement, data.qrCode, { 
+        width: 256,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      }, function(error) {
         if (error) {
           console.error('Error generating QR code:', error);
           qrCodeElement.innerHTML = '<p class="text-danger">Error generating QR code</p>';
@@ -103,11 +117,13 @@ async function checkStatus() {
       });
       qrCheckAttempts = 0; // Reset counter
     } else {
+      clientStatusElem.className = 'mb-3 text-info';
       clientStatusElem.textContent = 'Client Status: Waiting for QR code...';
       qrCheckAttempts++;
       
       if (qrCheckAttempts > MAX_QR_CHECK_ATTEMPTS) {
-        clientStatusElem.textContent = 'Client Status: QR code not received. Try restarting.';
+        clientStatusElem.className = 'mb-3 text-danger';
+        clientStatusElem.textContent = 'Client Status: Timeout. Please try again.';
         document.getElementById('initClient').disabled = false;
         clearInterval(statusInterval);
         statusInterval = null;
