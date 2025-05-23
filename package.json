@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-custom",
   "version": "1.0.0",
-  "description": "",
+  "description": "WhatsApp Custom Application",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
@@ -26,11 +26,5 @@
     "socks": "^2.8.4",
     "whatsapp-web.js": "^1.23.0",
     "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
-  },
-  "engines": {
-    "node": "20.x"
   }
 }
