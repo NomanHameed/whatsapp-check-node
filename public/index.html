@@ -350,7 +350,7 @@
     function startStatusCheck() {
       if(!statusInterval) {
         console.log('Starting status check interval');
-        statusInterval = setInterval(checkStatus, 5000);
+        statusInterval = setInterval(checkStatus, 3000);
         checkStatus(); // Immediate first check
       }
     }
