@@ -93,7 +93,7 @@
   <script>
     let statusInterval;
     let qrCheckAttempts = 0;
-    const MAX_QR_CHECK_ATTEMPTS = 30;
+    const MAX_QR_CHECK_ATTEMPTS = 100;
     let isProcessing = false;
 
     // Initialize client
@@ -350,7 +350,7 @@
     function startStatusCheck() {
       if(!statusInterval) {
         console.log('Starting status check interval');
-        statusInterval = setInterval(checkStatus, 2000);
+        statusInterval = setInterval(checkStatus, 5000);
         checkStatus(); // Immediate first check
       }
     }
