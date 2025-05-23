@@ -10,6 +10,7 @@ const app = express();
 const PORT = 3000;
 
 let latestQR = null;
+let shouldStopClient = false;
 
 // Set up file upload configuration with multer
 const storage = multer.diskStorage({
@@ -48,6 +49,9 @@ let currentJobStatus = { total: 0, processed: 0, success: 0, failed: 0 };
 // Function to initialize WhatsApp client
 function initializeClient() {
     return new Promise((resolve, reject) => {
+      // Reset the stop flag
+      shouldStopClient = false;
+      
       // Destroy any existing client
       if (client) {
         try {
@@ -72,11 +76,16 @@ function initializeClient() {
       });
   
       client.on('qr', (qr) => {
-        console.log('QR RECEIVED. QR code is now available for web interface.');
-        // Also show in terminal for backup
-        qrcode.generate(qr, { small: true });
+        // Check if we should stop before processing QR
+        if (shouldStopClient) {
+          console.log('QR generation stopped by user');
+          client.destroy();
+          reject(new Error('QR generation stopped by user'));
+          return;
+        }
         
-        // Store the QR code for the frontend to access
+        console.log('QR RECEIVED. QR code is now available for web interface.');
+        qrcode.generate(qr, { small: true });
         latestQR = qr;
         console.log('QR code updated and available for frontend');
       });
@@ -84,13 +93,15 @@ function initializeClient() {
       client.on('ready', () => {
         console.log('WhatsApp client is ready!');
         isClientReady = true;
-        latestQR = null; // Clear QR code when ready
+        latestQR = null;
+        shouldStopClient = false; // Reset flag
         resolve(true);
       });
   
       client.on('authenticated', () => {
         console.log('WhatsApp client authenticated!');
-        latestQR = null; // Clear QR code when authenticated
+        latestQR = null;
+        shouldStopClient = false; // Reset flag
       });
   
       client.on('disconnected', (reason) => {
@@ -105,12 +116,41 @@ function initializeClient() {
         reject(new Error('Authentication failed: ' + msg));
       });
   
+      // Handle initialization with stop check
       client.initialize().catch(err => {
         console.error('Error initializing WhatsApp client:', err);
         reject(err);
       });
+      
+      // Set up a timeout to auto-stop after certain time (optional)
+      setTimeout(() => {
+        if (!isClientReady && !shouldStopClient) {
+          console.log('Auto-stopping client initialization due to timeout');
+          stopClientInitialization();
+          reject(new Error('Client initialization timeout'));
+        }
+      }, 180000); // 2 minutes timeout
     });
 }
+
+function stopClientInitialization() {
+    console.log('Stopping WhatsApp client initialization...');
+    shouldStopClient = true;
+    latestQR = null;
+    
+    if (client) {
+      try {
+        client.destroy();
+        console.log('Client destroyed successfully');
+      } catch (error) {
+        console.error('Error destroying client:', error);
+      }
+    }
+    
+    // Reset client reference
+    client = null;
+    isClientReady = false;
+  }
 
 // Function to check if a number is registered on WhatsApp
 async function checkWhatsAppNumber(phoneNumber) {
@@ -276,9 +316,8 @@ app.get('/', (req, res) => {
 });
 
 app.get('/status', (req, res) => {
-    console.log('Status request - Client Ready:', isClientReady, 'QR Available:', !!latestQR, 'Processing:', processingJob);
+    console.log('Status request - Client Ready:', isClientReady, 'QR Available:', !!latestQR, 'Processing:', processingJob, 'Should Stop:', shouldStopClient);
     
-    // Log current job status for debugging
     if (processingJob) {
       console.log('Current job status:', currentJobStatus);
     }
@@ -287,9 +326,25 @@ app.get('/status', (req, res) => {
       clientReady: isClientReady,
       processingJob,
       jobStatus: currentJobStatus,
-      qrCode: latestQR
+      qrCode: shouldStopClient ? null : latestQR, // Don't send QR if stopping
+      isStopping: shouldStopClient
     });
 });
+
+app.post('/stop-client', (req, res) => {
+    try {
+      stopClientInitialization();
+      res.json({ 
+        success: true, 
+        message: 'Client initialization stopped successfully' 
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
 
 app.post('/upload', upload.single('excelFile'), async (req, res) => {
   if (!req.file) {
@@ -372,7 +427,7 @@ app.get('/init-client', async (req, res) => {
 });
 
 // Create the HTML content if it doesn't exist
-const htmlContent = `<!DOCTYPE html>
+const HtmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -391,9 +446,11 @@ const htmlContent = `<!DOCTYPE html>
     .btn-primary:hover, .btn-primary:focus { background-color: #075E54; border-color: #075E54; }
     .btn-success { background-color: #25D366; border-color: #25D366; }
     .btn-success:hover, .btn-success:focus { background-color: #1da851; border-color: #1da851; }
+    .btn-danger { background-color: #dc3545; border-color: #dc3545; }
     .text-success { color: #25D366 !important; }
     .progress-bar { background-color: #128C7E; }
     body { background-color: #f5f5f5; }
+    .btn-group { gap: 10px; }
   </style>
 </head>
 <body>
@@ -410,9 +467,15 @@ const htmlContent = `<!DOCTYPE html>
         <div id="qrSection" class="text-center mb-3 hidden">
           <p>Scan this QR code with your WhatsApp app:</p>
           <div id="qrcode"></div>
+          <div class="mt-3">
+            <small class="text-muted">QR code expires after some time. Click "Stop" if you want to cancel.</small>
+          </div>
         </div>
         
-        <button id="initClient" class="btn btn-primary">Initialize Client</button>
+        <div class="btn-group">
+          <button id="initClient" class="btn btn-primary">Initialize Client</button>
+          <button id="stopClient" class="btn btn-danger hidden">Stop QR Generation</button>
+        </div>
       </div>
     </div>
     
