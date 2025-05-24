@@ -427,7 +427,7 @@ app.get('/init-client', async (req, res) => {
 });
 
 // Create the HTML content if it doesn't exist
-const HtmlContent = `<!DOCTYPE html>
+const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -563,6 +563,32 @@ document.getElementById('initClient').addEventListener('click', async () => {
   }
 });
 
+// Stop client button
+document.getElementById('stopClient').addEventListener('click', async () => {
+  try {
+    const response = await fetch('/stop-client', { method: 'POST' });
+    const data = await response.json();
+    
+    if(data.success) {
+      document.getElementById('clientStatus').textContent = 'Client Status: Stopped';
+      document.getElementById('clientStatus').className = 'mb-3 text-danger';
+      document.getElementById('qrSection').classList.add('hidden');
+      document.getElementById('stopClient').classList.add('hidden');
+      document.getElementById('initClient').disabled = false;
+      
+      // Stop status checking
+      if(statusInterval) {
+        clearInterval(statusInterval);
+        statusInterval = null;
+      }
+    } else {
+      alert('Error stopping client: ' + data.error);
+    }
+  } catch (error) {
+    alert('Error: ' + error.message);
+  }
+});
+
 // Upload form
 document.getElementById('uploadForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -664,10 +690,19 @@ async function checkStatus() {
     // Update client status
     const clientStatusElem = document.getElementById('clientStatus');
     
+    if(data.isStopping) {
+      clientStatusElem.className = 'mb-3 text-danger';
+      clientStatusElem.textContent = 'Client Status: Stopping...';
+      document.getElementById('qrSection').classList.add('hidden');
+      document.getElementById('stopClient').classList.add('hidden');
+      return;
+    }
+    
     if(data.clientReady) {
       clientStatusElem.className = 'mb-3 text-success';
       clientStatusElem.textContent = 'Client Status: Ready ✓';
       document.getElementById('qrSection').classList.add('hidden');
+      document.getElementById('stopClient').classList.add('hidden');
       document.getElementById('uploadBtn').disabled = false;
       document.getElementById('initClient').disabled = true;
       qrCheckAttempts = 0; // Reset counter
@@ -682,8 +717,9 @@ async function checkStatus() {
       clientStatusElem.textContent = 'Client Status: Please scan the QR code below';
       console.log('QR code received, displaying...');
       
-      // Show QR code
+      // Show QR code and stop button
       document.getElementById('qrSection').classList.remove('hidden');
+      document.getElementById('stopClient').classList.remove('hidden');
       const qrCodeElement = document.getElementById('qrcode');
       qrCodeElement.innerHTML = '';
       
@@ -707,12 +743,14 @@ async function checkStatus() {
     } else {
       clientStatusElem.className = 'mb-3 text-info';
       clientStatusElem.textContent = 'Client Status: Waiting for QR code...';
+      document.getElementById('stopClient').classList.remove('hidden');
       qrCheckAttempts++;
       
       if (qrCheckAttempts > MAX_QR_CHECK_ATTEMPTS) {
         clientStatusElem.className = 'mb-3 text-danger';
         clientStatusElem.textContent = 'Client Status: Timeout. Please try again.';
         document.getElementById('initClient').disabled = false;
+        document.getElementById('stopClient').classList.add('hidden');
         clearInterval(statusInterval);
         statusInterval = null;
       }
