@@ -7,17 +7,17 @@ const xlsx = require("xlsx");
 const express = require("express");
 const multer = require("multer");
 const app = express();
-const PORT = 3020;
+const PORT = 3021;
 const session = require("express-session");
 
 app.use(
   session({
-    secret: "your-secret-key-here", // Replace with a real secret
+    secret: "noman-change-karka-jo-marzi-krdi",
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: false, // Set to true in production with HTTPS
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      secure: false,
+      maxAge: 24 * 60 * 60 * 1000,
     },
   }),
 );
@@ -352,7 +352,7 @@ app.get("/logout-action", (req, res) => {
       console.error("Logout error:", err);
       return res.status(500).send("Logout failed");
     }
-    res.redirect("/");
+    res.redirect("/hello");
   });
 });
 
@@ -367,7 +367,7 @@ app.post("/login-action", (req, res) => {
   if (username === validUsername && password === validPassword) {
     req.session.isLoggedIn = true;
     console.log("Login successful - session created");
-    return res.redirect("/");
+    return res.redirect("/hello");
   } else {
     console.log("Invalid credentials attempt");
     return res.redirect("/?error=invalidCredentials");
