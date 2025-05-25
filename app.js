@@ -49,7 +49,7 @@ const resultsDir = path.join(__dirname, "results");
 // Set up Express app
 app.use(express.urlencoded({ extended: true })); // For parsing form data
 app.use(express.json()); // For parsing JSON
-app.use(express.static("public"));
+// app.use(express.static("public"));
 app.use("/profile_pics", express.static("profile_pics"));
 app.use("/results", express.static("results"));
 
@@ -134,6 +134,22 @@ function initializeClient() {
       }
     }, 180000); // 2 minutes timeout
   });
+}
+
+app.get("/", (req, res) => {
+  res.redirect("/app");
+});
+
+app.get("/app", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+function requireAuth(req, res, next) {
+  if (req.session && req.session.isLoggedIn) {
+    return next();
+  } else {
+    return res.sendFile(path.join(__dirname, "public", "login.html"));
+  }
 }
 
 function stopClientInitialization() {
@@ -300,23 +316,25 @@ async function processExcelFile(filePath) {
   }
 }
 
-app.get("/hello", (req, res) => {
-  if (req?.session?.isLoggedIn) {
-    res.sendFile(path.join(__dirname, "public", "index.html"));
-    path.join(__dirname, "public", "app.js");
-  } else {
-    res.sendFile(path.join(__dirname, "public", "login.html"));
-  }
-});
+// app.get("/hello", (req, res) => {
+//   if (req?.session?.isLoggedIn) {
+//     res.sendFile(path.join(__dirname, "public", "index.html"));
+//   } else {
+//     res.sendFile(path.join(__dirname, "public", "login.html"));
+//   }
+// });
+
 app.get("/logout-action", (req, res) => {
   req.session.destroy((err) => {
     if (err) {
       console.error("Logout error:", err);
       return res.status(500).send("Logout failed");
     }
-    res.redirect("/hello");
+    res.redirect("/app");
   });
 });
+
+app.use("/static", requireAuth, express.static("public"));
 
 app.post("/login-action", (req, res) => {
   const { username, password } = req.body;
@@ -329,7 +347,7 @@ app.post("/login-action", (req, res) => {
   if (username === validUsername && password === validPassword) {
     req.session.isLoggedIn = true;
     console.log("Login successful - session created");
-    return res.redirect("/hello");
+    return res.redirect("/app");
   } else {
     req.session.isLoggedIn = false;
     console.log("Invalid credentials attempt");
@@ -337,7 +355,7 @@ app.post("/login-action", (req, res) => {
   }
 });
 
-app.get("/status", (req, res) => {
+app.get("/status", requireAuth, (req, res) => {
   console.log(
     "Status request - Client Ready:",
     isClientReady,
@@ -353,12 +371,12 @@ app.get("/status", (req, res) => {
     clientReady: isClientReady,
     processingJob,
     jobStatus: currentJobStatus,
-    qrCode: shouldStopClient ? null : latestQR, // Don't send QR if stopping
+    qrCode: shouldStopClient ? null : latestQR,
     isStopping: shouldStopClient,
   });
 });
 
-app.post("/stop-client", (req, res) => {
+app.post("/stop-client", requireAuth, (req, res) => {
   try {
     stopClientInitialization();
     res.json({
@@ -373,7 +391,8 @@ app.post("/stop-client", (req, res) => {
   }
 });
 
-app.post("/upload", upload.single("excelFile"), async (req, res) => {
+app.post("/upload", requireAuth, upload.single("excelFile"), async (req, res) => {
+  // Your existing upload logic remains the same
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded" });
   }
@@ -386,8 +405,7 @@ app.post("/upload", upload.single("excelFile"), async (req, res) => {
 
   if (processingJob) {
     return res.status(400).json({
-      error:
-        "Another job is currently processing. Please wait until it finishes.",
+      error: "Another job is currently processing. Please wait until it finishes.",
     });
   }
 
@@ -413,7 +431,7 @@ app.post("/upload", upload.single("excelFile"), async (req, res) => {
   }
 });
 
-app.get("/download-result", (req, res) => {
+app.get("/download-result", requireAuth, (req, res) => {
   if (processingJob) {
     return res.json({ processing: true });
   }
@@ -438,7 +456,18 @@ app.get("/download-result", (req, res) => {
   res.json({ processing: false, completed: false });
 });
 
-app.get("/init-client", async (req, res) => {
+// app.use(session({
+//   secret: process.env.SESSION_SECRET || "your-secret-key",
+//   resave: false,
+//   saveUninitialized: false,
+//   cookie: {
+//     secure: process.env.NODE_ENV === 'production', // HTTPS in production
+//     maxAge: 24 * 60 * 60 * 1000,
+//     httpOnly: true
+//   },
+// }));
+
+app.get("/init-client", requireAuth, async (req, res) => {
   if (isClientReady) {
     return res.json({
       success: true,
