@@ -324,14 +324,58 @@ async function processExcelFile(filePath) {
 //   }
 // });
 
-app.get("/logout-action", (req, res) => {
-  req.session.destroy((err) => {
-    if (err) {
-      console.error("Logout error:", err);
-      return res.status(500).send("Logout failed");
+app.get("/logout-action", async (req, res) => {
+  try {
+    // First, handle WhatsApp client cleanup
+    if (client) {
+      console.log("Cleaning up WhatsApp client on logout...");
+      
+      try {
+        // Stop any ongoing processes
+        shouldStopClient = true;
+        processingJob = false;
+        
+        // Reset client state
+        isClientReady = false;
+        latestQR = null;
+        
+        // Reset job status
+        currentJobStatus = { total: 0, processed: 0, success: 0, failed: 0 };
+        
+        // Properly destroy the client
+        await client.destroy();
+        console.log("WhatsApp client destroyed successfully");
+        
+        // Clear the client reference
+        client = null;
+        
+      } catch (clientError) {
+        console.error("Error cleaning up WhatsApp client:", clientError);
+        // Continue with logout even if client cleanup fails
+      }
     }
-    res.redirect("/app");
-  });
+    
+    // Then destroy the session
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("Session destruction error:", err);
+        return res.status(500).send("Logout failed");
+      }
+      
+      console.log("User logged out successfully - session destroyed and client cleaned up");
+      res.redirect("/app");
+    });
+    
+  } catch (error) {
+    console.error("Logout error:", error);
+    // Force session destruction even if other cleanup fails
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("Force session destruction error:", err);
+      }
+      res.redirect("/app");
+    });
+  }
 });
 
 app.use("/static", requireAuth, express.static("public"));
