@@ -1,44 +1,58 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-const xlsx = require('xlsx');
-const express = require('express');
-const multer = require('multer');
+const { Client, LocalAuth } = require("whatsapp-web.js");
+const qrcode = require("qrcode-terminal");
+const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
+const xlsx = require("xlsx");
+const express = require("express");
+const multer = require("multer");
 const app = express();
-const PORT = 3000;
+const PORT = 3020;
+const session = require("express-session");
 
+app.use(
+  session({
+    secret: "your-secret-key-here", // Replace with a real secret
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: false, // Set to true in production with HTTPS
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
+  }),
+);
 let latestQR = null;
 let shouldStopClient = false;
 
 // Set up file upload configuration with multer
 const storage = multer.diskStorage({
-  destination: function(req, file, cb) {
-    cb(null, './uploads');
+  destination: function (req, file, cb) {
+    cb(null, "./uploads");
   },
-  filename: function(req, file, cb) {
-    cb(null, Date.now() + '-' + file.originalname);
-  }
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + "-" + file.originalname);
+  },
 });
 
 const upload = multer({ storage: storage });
 
 // Create necessary directories
-const outputDir = path.join(__dirname, 'profile_pics');
-const uploadsDir = path.join(__dirname, 'uploads');
-const resultsDir = path.join(__dirname, 'results');
+const outputDir = path.join(__dirname, "profile_pics");
+const uploadsDir = path.join(__dirname, "uploads");
+const resultsDir = path.join(__dirname, "results");
 
-[outputDir, uploadsDir, resultsDir].forEach(dir => {
+[outputDir, uploadsDir, resultsDir].forEach((dir) => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir);
   }
 });
 
 // Set up Express app
-app.use(express.static('public'));
-app.use('/profile_pics', express.static('profile_pics'));
-app.use('/results', express.static('results'));
+app.use(express.urlencoded({ extended: true })); // For parsing form data
+app.use(express.json()); // For parsing JSON
+app.use(express.static("public"));
+app.use("/profile_pics", express.static("profile_pics"));
+app.use("/results", express.static("results"));
 
 // Initialize WhatsApp client with local authentication
 let client = null;
@@ -48,131 +62,131 @@ let currentJobStatus = { total: 0, processed: 0, success: 0, failed: 0 };
 
 // Function to initialize WhatsApp client
 function initializeClient() {
-    return new Promise((resolve, reject) => {
-      // Reset the stop flag
-      shouldStopClient = false;
-      
-      // Destroy any existing client
-      if (client) {
-        try {
-          client.destroy();
-        } catch (e) {
-          console.log('Error destroying client:', e);
-        }
-      }
-      
-      // Reset status variables
-      isClientReady = false;
-      latestQR = null;
-      
-      console.log('Initializing new WhatsApp client...');
-      
-      client = new Client({
-        authStrategy: new LocalAuth(),
-        puppeteer: {
-          headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
-        }
-      });
-  
-      client.on('qr', (qr) => {
-        // Check if we should stop before processing QR
-        if (shouldStopClient) {
-          console.log('QR generation stopped by user');
-          client.destroy();
-          reject(new Error('QR generation stopped by user'));
-          return;
-        }
-        
-        console.log('QR RECEIVED. QR code is now available for web interface.');
-        qrcode.generate(qr, { small: true });
-        latestQR = qr;
-        console.log('QR code updated and available for frontend');
-      });
-  
-      client.on('ready', () => {
-        console.log('WhatsApp client is ready!');
-        isClientReady = true;
-        latestQR = null;
-        shouldStopClient = false; // Reset flag
-        resolve(true);
-      });
-  
-      client.on('authenticated', () => {
-        console.log('WhatsApp client authenticated!');
-        latestQR = null;
-        shouldStopClient = false; // Reset flag
-      });
-  
-      client.on('disconnected', (reason) => {
-        console.log('Client was disconnected:', reason);
-        isClientReady = false;
-        latestQR = null;
-      });
+  return new Promise((resolve, reject) => {
+    // Reset the stop flag
+    shouldStopClient = false;
 
-      client.on('auth_failure', (msg) => {
-        console.error('Authentication failed:', msg);
-        latestQR = null;
-        reject(new Error('Authentication failed: ' + msg));
-      });
-  
-      // Handle initialization with stop check
-      client.initialize().catch(err => {
-        console.error('Error initializing WhatsApp client:', err);
-        reject(err);
-      });
-      
-      // Set up a timeout to auto-stop after certain time (optional)
-      setTimeout(() => {
-        if (!isClientReady && !shouldStopClient) {
-          console.log('Auto-stopping client initialization due to timeout');
-          stopClientInitialization();
-          reject(new Error('Client initialization timeout'));
-        }
-      }, 180000); // 2 minutes timeout
-    });
-}
-
-function stopClientInitialization() {
-    console.log('Stopping WhatsApp client initialization...');
-    shouldStopClient = true;
-    latestQR = null;
-    
+    // Destroy any existing client
     if (client) {
       try {
         client.destroy();
-        console.log('Client destroyed successfully');
-      } catch (error) {
-        console.error('Error destroying client:', error);
+      } catch (e) {
+        console.log("Error destroying client:", e);
       }
     }
-    
-    // Reset client reference
-    client = null;
+
+    // Reset status variables
     isClientReady = false;
+    latestQR = null;
+
+    console.log("Initializing new WhatsApp client...");
+
+    client = new Client({
+      authStrategy: new LocalAuth(),
+      puppeteer: {
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      },
+    });
+
+    client.on("qr", (qr) => {
+      // Check if we should stop before processing QR
+      if (shouldStopClient) {
+        console.log("QR generation stopped by user");
+        client.destroy();
+        reject(new Error("QR generation stopped by user"));
+        return;
+      }
+
+      console.log("QR RECEIVED. QR code is now available for web interface.");
+      qrcode.generate(qr, { small: true });
+      latestQR = qr;
+      console.log("QR code updated and available for frontend");
+    });
+
+    client.on("ready", () => {
+      console.log("WhatsApp client is ready!");
+      isClientReady = true;
+      latestQR = null;
+      shouldStopClient = false; // Reset flag
+      resolve(true);
+    });
+
+    client.on("authenticated", () => {
+      console.log("WhatsApp client authenticated!");
+      latestQR = null;
+      shouldStopClient = false; // Reset flag
+    });
+
+    client.on("disconnected", (reason) => {
+      console.log("Client was disconnected:", reason);
+      isClientReady = false;
+      latestQR = null;
+    });
+
+    client.on("auth_failure", (msg) => {
+      console.error("Authentication failed:", msg);
+      latestQR = null;
+      reject(new Error("Authentication failed: " + msg));
+    });
+
+    // Handle initialization with stop check
+    client.initialize().catch((err) => {
+      console.error("Error initializing WhatsApp client:", err);
+      reject(err);
+    });
+
+    // Set up a timeout to auto-stop after certain time (optional)
+    setTimeout(() => {
+      if (!isClientReady && !shouldStopClient) {
+        console.log("Auto-stopping client initialization due to timeout");
+        stopClientInitialization();
+        reject(new Error("Client initialization timeout"));
+      }
+    }, 180000); // 2 minutes timeout
+  });
+}
+
+function stopClientInitialization() {
+  console.log("Stopping WhatsApp client initialization...");
+  shouldStopClient = true;
+  latestQR = null;
+
+  if (client) {
+    try {
+      client.destroy();
+      console.log("Client destroyed successfully");
+    } catch (error) {
+      console.error("Error destroying client:", error);
+    }
   }
+
+  // Reset client reference
+  client = null;
+  isClientReady = false;
+}
 
 // Function to check if a number is registered on WhatsApp
 async function checkWhatsAppNumber(phoneNumber) {
   try {
     // Format phone number (add @ for WhatsApp ID format)
     const formattedNumber = `${phoneNumber}@c.us`;
-    
+
     // Check if the number exists on WhatsApp
     const contactInfo = await client.getContactById(formattedNumber);
-    
+
     const result = {
       phoneNumber,
       isRegistered: false,
-      name: 'Not available',
-      profilePicUrl: 'Not available',
-      profilePicPath: null
+      name: "Not available",
+      profilePicUrl: "Not available",
+      profilePicPath: null,
     };
-    
+
     if (contactInfo) {
       result.isRegistered = true;
-      result.name = contactInfo.name || contactInfo.pushname || 'Not available';
-      
+      result.name = contactInfo.name || contactInfo.pushname || "Not available";
+
       // Try to get profile picture
       try {
         const profilePic = await client.getProfilePicUrl(formattedNumber);
@@ -185,19 +199,22 @@ async function checkWhatsAppNumber(phoneNumber) {
           }
         }
       } catch (err) {
-        console.log(`Could not retrieve profile picture for ${phoneNumber}:`, err.message);
+        console.log(
+          `Could not retrieve profile picture for ${phoneNumber}:`,
+          err.message,
+        );
       }
     }
-    
+
     return result;
   } catch (error) {
     console.log(`Error checking number ${phoneNumber}:`, error.message);
     return {
       phoneNumber,
-      isRegistered: error.message.includes('404') ? false : 'Error',
-      name: 'Error',
+      isRegistered: error.message.includes("404") ? false : "Error",
+      name: "Error",
       profilePicUrl: error.message,
-      profilePicPath: null
+      profilePicPath: null,
     };
   }
 }
@@ -206,28 +223,28 @@ async function checkWhatsAppNumber(phoneNumber) {
 async function downloadProfilePicture(url, phoneNumber) {
   try {
     const response = await axios({
-      method: 'GET',
+      method: "GET",
       url: url,
-      responseType: 'stream'
+      responseType: "stream",
     });
-    
+
     const filePath = path.join(outputDir, `${phoneNumber}.jpg`);
     const writer = fs.createWriteStream(filePath);
-    
+
     response.data.pipe(writer);
-    
+
     return new Promise((resolve, reject) => {
-      writer.on('finish', () => {
+      writer.on("finish", () => {
         console.log(`Profile picture saved to: ${filePath}`);
         resolve(filePath);
       });
-      writer.on('error', (err) => {
+      writer.on("error", (err) => {
         console.error(`Error saving profile picture: ${err.message}`);
         reject(err);
       });
     });
   } catch (error) {
-    console.error('Error downloading profile picture:', error.message);
+    console.error("Error downloading profile picture:", error.message);
     return null;
   }
 }
@@ -238,43 +255,47 @@ async function processExcelFile(filePath) {
     // Reset job status
     currentJobStatus = { total: 0, processed: 0, success: 0, failed: 0 };
     processingJob = true;
-    
+
     // Read the Excel file
     const workbook = xlsx.readFile(filePath);
     const worksheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(worksheet);
-    
+
     // Extract phone numbers from the first column (assuming the first column contains phone numbers)
     let phoneNumbers = [];
     if (data.length > 0) {
       // Get the first key which should be the column name for phone numbers
       const firstKey = Object.keys(data[0])[0];
-      phoneNumbers = data.map(row => String(row[firstKey]).trim()).filter(num => num && num !== '');
+      phoneNumbers = data
+        .map((row) => String(row[firstKey]).trim())
+        .filter((num) => num && num !== "");
     }
-    
+
     currentJobStatus.total = phoneNumbers.length;
     console.log(`Found ${phoneNumbers.length} phone numbers to process`);
-    
+
     // Create a new workbook for results
     const resultWorkbook = xlsx.utils.book_new();
     const resultsData = [];
-    
+
     // Process phone numbers with real-time updates
     for (let i = 0; i < phoneNumbers.length; i++) {
       const phoneNumber = phoneNumbers[i];
-      
-      console.log(`Processing phone number ${i + 1}/${phoneNumbers.length}: ${phoneNumber}`);
-      
+
+      console.log(
+        `Processing phone number ${i + 1}/${phoneNumbers.length}: ${phoneNumber}`,
+      );
+
       const result = await checkWhatsAppNumber(phoneNumber);
-      
+
       resultsData.push({
-        'Phone Number': phoneNumber,
-        'Registered on WhatsApp': result.isRegistered ? 'Yes' : 'No',
-        'Name': result.name,
-        'Profile Picture URL': result.profilePicUrl,
-        'Profile Picture Path': result.profilePicPath || 'Not available'
+        "Phone Number": phoneNumber,
+        "Registered on WhatsApp": result.isRegistered ? "Yes" : "No",
+        Name: result.name,
+        "Profile Picture URL": result.profilePicUrl,
+        "Profile Picture Path": result.profilePicPath || "Not available",
       });
-      
+
       // Update progress in real-time
       currentJobStatus.processed = i + 1;
       if (result.isRegistered === true) {
@@ -282,146 +303,204 @@ async function processExcelFile(filePath) {
       } else {
         currentJobStatus.failed++;
       }
-      
+
       // Log progress
-      const progressPercent = Math.round((currentJobStatus.processed / currentJobStatus.total) * 100);
-      console.log(`Progress: ${progressPercent}% (${currentJobStatus.processed}/${currentJobStatus.total}) - Success: ${currentJobStatus.success}, Failed: ${currentJobStatus.failed}`);
-      
+      const progressPercent = Math.round(
+        (currentJobStatus.processed / currentJobStatus.total) * 100,
+      );
+      console.log(
+        `Progress: ${progressPercent}% (${currentJobStatus.processed}/${currentJobStatus.total}) - Success: ${currentJobStatus.success}, Failed: ${currentJobStatus.failed}`,
+      );
+
       // Add a small delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    
+
     // Create a worksheet with the results
     const resultsWorksheet = xlsx.utils.json_to_sheet(resultsData);
-    xlsx.utils.book_append_sheet(resultWorkbook, resultsWorksheet, 'Results');
-    
+    xlsx.utils.book_append_sheet(resultWorkbook, resultsWorksheet, "Results");
+
     // Save the workbook
     const resultFilename = `whatsapp_check_results_${Date.now()}.xlsx`;
     const resultFilePath = path.join(resultsDir, resultFilename);
     xlsx.writeFile(resultWorkbook, resultFilePath);
-    
+
     processingJob = false;
-    console.log('Processing completed successfully!');
+    console.log("Processing completed successfully!");
     return { resultFilePath, resultFilename };
   } catch (error) {
-    console.error('Error processing Excel file:', error);
+    console.error("Error processing Excel file:", error);
     processingJob = false;
     throw error;
   }
 }
 
 // Routes
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// app.get("/", (req, res) => {
+//   res.sendFile(path.join(__dirname, "public", "index.html"));
+// });
+app.get("/hello", (req, res) => {
+  if (req?.session?.isLoggedIn) {
+    res.sendFile(path.join(__dirname, "public", "index.html"));
+  } else {
+    res.sendFile(path.join(__dirname, "public", "login.html"));
+  }
 });
-
-app.get('/status', (req, res) => {
-    console.log('Status request - Client Ready:', isClientReady, 'QR Available:', !!latestQR, 'Processing:', processingJob, 'Should Stop:', shouldStopClient);
-    
-    if (processingJob) {
-      console.log('Current job status:', currentJobStatus);
+app.get("/logout-action", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.error("Logout error:", err);
+      return res.status(500).send("Logout failed");
     }
-    
-    res.json({
-      clientReady: isClientReady,
-      processingJob,
-      jobStatus: currentJobStatus,
-      qrCode: shouldStopClient ? null : latestQR, // Don't send QR if stopping
-      isStopping: shouldStopClient
-    });
-});
-
-app.post('/stop-client', (req, res) => {
-    try {
-      stopClientInitialization();
-      res.json({ 
-        success: true, 
-        message: 'Client initialization stopped successfully' 
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    }
+    res.redirect("/");
   });
+});
 
-app.post('/upload', upload.single('excelFile'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+app.post("/login-action", (req, res) => {
+  const { username, password } = req.body;
+
+  console.log("Login attempt:", username); // Debug log
+
+  const validUsername = "user";
+  const validPassword = "password123";
+
+  if (username === validUsername && password === validPassword) {
+    req.session.isLoggedIn = true;
+    console.log("Login successful - session created");
+    return res.redirect("/");
+  } else {
+    console.log("Invalid credentials attempt");
+    return res.redirect("/?error=invalidCredentials");
   }
-  
-  if (!isClientReady) {
-    return res.status(400).json({ error: 'WhatsApp client is not ready. Please scan the QR code first.' });
-  }
-  
-  if (processingJob) {
-    return res.status(400).json({ error: 'Another job is currently processing. Please wait until it finishes.' });
-  }
-  
+});
+
+app.get("/status", (req, res) => {
+  console.log(
+    "Status request - Client Ready:",
+    isClientReady,
+    "QR Available:",
+    !!latestQR,
+    "Processing:",
+    processingJob,
+    "Should Stop:",
+    shouldStopClient,
+  );
+
+  res.json({
+    clientReady: isClientReady,
+    processingJob,
+    jobStatus: currentJobStatus,
+    qrCode: shouldStopClient ? null : latestQR, // Don't send QR if stopping
+    isStopping: shouldStopClient,
+  });
+});
+
+app.post("/stop-client", (req, res) => {
   try {
-    // Start processing in background and return immediately
-    processExcelFile(req.file.path).then(result => {
-      console.log('File processing completed:', result.resultFilename);
-    }).catch(error => {
-      console.error('File processing failed:', error);
-    });
-    
+    stopClientInitialization();
     res.json({
       success: true,
-      message: 'File processing started. Check the progress below.',
-      processing: true
+      message: "Client initialization stopped successfully",
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
+    });
+  }
+});
+
+app.post("/upload", upload.single("excelFile"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No file uploaded" });
+  }
+
+  if (!isClientReady) {
+    return res.status(400).json({
+      error: "WhatsApp client is not ready. Please scan the QR code first.",
+    });
+  }
+
+  if (processingJob) {
+    return res.status(400).json({
+      error:
+        "Another job is currently processing. Please wait until it finishes.",
+    });
+  }
+
+  try {
+    // Start processing in background and return immediately
+    processExcelFile(req.file.path)
+      .then((result) => {
+        console.log("File processing completed:", result.resultFilename);
+      })
+      .catch((error) => {
+        console.error("File processing failed:", error);
+      });
+
+    res.json({
+      success: true,
+      message: "File processing started. Check the progress below.",
+      processing: true,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
     });
   }
 });
 
 // New endpoint to get the download link when processing is complete
-app.get('/download-result', (req, res) => {
+app.get("/download-result", (req, res) => {
   if (processingJob) {
     return res.json({ processing: true });
   }
-  
+
   // Check if there's a completed result file
-  const resultFiles = fs.readdirSync(resultsDir).filter(file => file.endsWith('.xlsx'));
+  const resultFiles = fs
+    .readdirSync(resultsDir)
+    .filter((file) => file.endsWith(".xlsx"));
   if (resultFiles.length > 0) {
     // Get the most recent file
     const latestFile = resultFiles
-      .map(file => ({
+      .map((file) => ({
         name: file,
-        time: fs.statSync(path.join(resultsDir, file)).mtime.getTime()
+        time: fs.statSync(path.join(resultsDir, file)).mtime.getTime(),
       }))
       .sort((a, b) => b.time - a.time)[0];
-    
+
     return res.json({
       processing: false,
       completed: true,
-      downloadUrl: `/results/${latestFile.name}`
+      downloadUrl: `/results/${latestFile.name}`,
     });
   }
-  
+
   res.json({ processing: false, completed: false });
 });
 
-app.get('/init-client', async (req, res) => {
+app.get("/init-client", async (req, res) => {
   if (isClientReady) {
-    return res.json({ success: true, message: 'Client is already initialized and ready' });
+    return res.json({
+      success: true,
+      message: "Client is already initialized and ready",
+    });
   }
-  
+
   try {
     // Don't await here, let it initialize in background
-    initializeClient().catch(err => {
-      console.error('Client initialization failed:', err);
+    initializeClient().catch((err) => {
+      console.error("Client initialization failed:", err);
     });
-    res.json({ success: true, message: 'Client initialization started. Please wait for QR code...' });
+    res.json({
+      success: true,
+      message: "Client initialization started. Please wait for QR code...",
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -525,17 +604,22 @@ const htmlContent = `<!DOCTYPE html>
 </body>
 </html>`;
 
-// Create public directory and files
-if (!fs.existsSync(path.join(__dirname, 'public'))) {
-  fs.mkdirSync(path.join(__dirname, 'public'));
+if (!fs.existsSync(path.join(__dirname, "public"))) {
+  fs.mkdirSync(path.join(__dirname, "public"));
 }
 
 // Only write HTML if it doesn't exist
-if (!fs.existsSync(path.join(__dirname, 'public', 'index.html'))) {
-  fs.writeFileSync(path.join(__dirname, 'public', 'index.html'), htmlContent);
+const publicIndexPath = path.join(__dirname, "public", "index.html");
+if (!fs.existsSync(publicIndexPath)) {
+  fs.writeFileSync(publicIndexPath, htmlContent);
 }
 
-// Write the updated app.js file
+// Only write app.js if it doesn't exist
+const publicAppJsPath = path.join(__dirname, "public", "app.js");
+if (!fs.existsSync(publicAppJsPath)) {
+  fs.writeFileSync(publicAppJsPath, appJsContent);
+}
+
 const appJsContent = `// File: public/app.js
 let statusInterval;
 let qrCheckAttempts = 0;
@@ -795,11 +879,13 @@ window.addEventListener('beforeunload', () => {
 });`;
 
 // Write the app.js file
-fs.writeFileSync(path.join(__dirname, 'public', 'app.js'), appJsContent);
+fs.writeFileSync(path.join(__dirname, "public", "app.js"), appJsContent);
 
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Access the WhatsApp Number Checker app in your browser`);
-  console.log(`The QR code will appear on the web interface when you click "Initialize Client"`);
+  console.log(
+    `The QR code will appear on the web interface when you click "Initialize Client"`,
+  );
 });

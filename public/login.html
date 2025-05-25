@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login Page</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+          "Segoe UI Symbol";
+        background-color: #f0f2f5;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+      }
+
+      .login-container {
+        background-color: #fff;
+        padding: 30px 40px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        width: 320px;
+      }
+
+      h2 {
+        color: #1c1e21;
+        margin-bottom: 25px;
+        font-size: 24px;
+        font-weight: 600;
+      }
+
+      .input-group {
+        margin-bottom: 20px;
+        text-align: left;
+      }
+
+      .input-group label {
+        display: block;
+        margin-bottom: 8px;
+        color: #606770;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .input-group input {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #dddfe2;
+        border-radius: 6px;
+        box-sizing: border-box;
+        font-size: 16px;
+      }
+
+      .input-group input:focus {
+        border-color: #1877f2;
+        box-shadow: 0 0 0 2px #e7f3ff;
+        outline: none;
+      }
+
+      button[type="submit"] {
+        width: 100%;
+        padding: 12px;
+        background-color: #1877f2;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 17px;
+        font-weight: 600;
+        transition: background-color 0.2s;
+      }
+
+      button[type="submit"]:hover {
+        background-color: #166fe5;
+      }
+
+      #clientMessage {
+        margin-top: 15px;
+        font-size: 14px;
+      }
+
+      .success {
+        color: #31a24c; /* Green for success */
+      }
+
+      .error {
+        color: #fa383e; /* Red for error */
+      }
+      .info {
+        color: #606770; /* Neutral info color */
+      }
+
+      .info-text {
+        font-size: 0.85em;
+        color: #606770;
+        margin-top: 20px;
+      }
+      .info-text code {
+        background-color: #f0f2f5;
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+          Courier, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="login-container">
+      <h2>Login</h2>
+      <form id="loginForm" action="/login-action" method="POST">
+        <div class="input-group">
+          <label for="username">Username</label>
+          <input
+            type="text"
+            id="username"
+            name="username"
+            required
+            placeholder="Enter your username"
+          />
+        </div>
+        <div class="input-group">
+          <label for="password">Password</label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            required
+            placeholder="Enter your password"
+          />
+        </div>
+        <button type="submit">Log In</button>
+        <p id="clientMessage"></p>
+      </form>
+      <p class="info-text">
+        (Demo credentials: user: <code>user</code>, pass:
+        <code>password123</code>)
+      </p>
+    </div>
+
+    <script>
+      const clientMessageElement = document.getElementById("clientMessage");
+      const loginForm = document.getElementById("loginForm");
+
+      if (loginForm) {
+        loginForm.addEventListener("submit", async function (event) {
+          event.preventDefault();
+
+          clientMessageElement.textContent = "Authenticating...";
+          clientMessageElement.className = "info";
+
+          try {
+            const response = await fetch("/login-action", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: new URLSearchParams(new FormData(loginForm)),
+            });
+
+            if (response.redirected) {
+              window.location.href = response.url;
+            } else {
+              const result = await response.text();
+              clientMessageElement.textContent = "Invalid username or password";
+              clientMessageElement.className = "error";
+            }
+          } catch (error) {
+            console.error("Error:", error);
+            clientMessageElement.textContent =
+              "Connection error. Please try again.";
+            clientMessageElement.className = "error";
+          }
+        });
+      }
+
+      // Handle error parameter in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has("error")) {
+        clientMessageElement.textContent = "Invalid username or password";
+        clientMessageElement.className = "error";
+      }
+    </script>
+  </body>
+</html>
