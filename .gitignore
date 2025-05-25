@@ -2,3 +2,4 @@ node_modules/
 profile_pics/
 .wwebjs_auth/
 .wwebjs_cache/
+.env
