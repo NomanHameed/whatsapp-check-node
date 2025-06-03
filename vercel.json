@@ -16,5 +16,11 @@
     "app.js": {
       "maxDuration": 300
     }
+  },
+  "git": {
+    "deploymentEnabled": {
+      "vercel": true,
+      "main": false
+    }
   }
 }
