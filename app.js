@@ -6,27 +6,37 @@ const path = require("path");
 const xlsx = require("xlsx");
 const express = require("express");
 const multer = require("multer");
-const app = express();
-const PORT = 3000;
 const session = require("express-session");
 
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Session configuration for production
 app.use(
   session({
-    secret: "noman-change-karka-jo-marzi-krdi",
+    secret: process.env.SESSION_SECRET || "noman-change-karka-jo-marzi-krdi",
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: false,
+      secure: process.env.NODE_ENV === 'production', // HTTPS in production
       maxAge: 24 * 60 * 60 * 1000,
+      httpOnly: true
     },
   }),
 );
+
 let latestQR = null;
 let shouldStopClient = false;
 
+// Multer configuration - use /tmp for Vercel
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, "./uploads");
+    const uploadDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : './uploads';
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
     cb(null, Date.now() + "-" + file.originalname);
@@ -35,23 +45,38 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// Create necessary directories
-const outputDir = path.join(__dirname, "profile_pics");
-const uploadsDir = path.join(__dirname, "uploads");
-const resultsDir = path.join(__dirname, "results");
+// Directory paths - use /tmp for production (Vercel's writable directory)
+const getDirectoryPaths = () => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  return {
+    outputDir: isProduction ? '/tmp/profile_pics' : path.join(__dirname, "profile_pics"),
+    uploadsDir: isProduction ? '/tmp/uploads' : path.join(__dirname, "uploads"),
+    resultsDir: isProduction ? '/tmp/results' : path.join(__dirname, "results")
+  };
+};
 
+const { outputDir, uploadsDir, resultsDir } = getDirectoryPaths();
+
+// Create necessary directories
 [outputDir, uploadsDir, resultsDir].forEach((dir) => {
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir);
+    fs.mkdirSync(dir, { recursive: true });
   }
 });
 
 // Set up Express app
-app.use(express.urlencoded({ extended: true })); // For parsing form data
-app.use(express.json()); // For parsing JSON
-// app.use(express.static("public"));
-app.use("/profile_pics", express.static("profile_pics"));
-app.use("/results", express.static("results"));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+// Static file serving
+if (process.env.NODE_ENV !== 'production') {
+  app.use("/profile_pics", express.static("profile_pics"));
+  app.use("/results", express.static("results"));
+} else {
+  // In production, serve from /tmp directories
+  app.use("/profile_pics", express.static("/tmp/profile_pics"));
+  app.use("/results", express.static("/tmp/results"));
+}
 
 // Initialize WhatsApp client with local authentication
 let client = null;
@@ -73,12 +98,30 @@ function initializeClient() {
     latestQR = null;
 
     console.log("Initializing new WhatsApp client...");
+    
+    // Modified puppeteer config for Vercel
+    const puppeteerConfig = {
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--single-process",
+        "--disable-gpu"
+      ],
+    };
+
+    // In production, don't use LocalAuth as it requires persistent storage
+    const authStrategy = process.env.NODE_ENV === 'production' 
+      ? undefined // Use default (no persistent auth)
+      : new LocalAuth();
+
     client = new Client({
-      authStrategy: new LocalAuth(),
-      puppeteer: {
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      },
+      authStrategy,
+      puppeteer: puppeteerConfig,
     });
 
     client.on("qr", (qr) => {
@@ -99,14 +142,14 @@ function initializeClient() {
       console.log("WhatsApp client is ready!");
       isClientReady = true;
       latestQR = null;
-      shouldStopClient = false; // Reset flag
+      shouldStopClient = false;
       resolve(true);
     });
 
     client.on("authenticated", () => {
       console.log("WhatsApp client authenticated!");
       latestQR = null;
-      shouldStopClient = false; // Reset flag
+      shouldStopClient = false;
     });
 
     client.on("disconnected", (reason) => {
@@ -254,6 +297,7 @@ async function processExcelFile(filePath) {
     const worksheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(worksheet);
     let phoneNumbers = [];
+    
     if (data.length > 0) {
       const firstKey = Object.keys(data[0])[0];
       phoneNumbers = data
@@ -316,46 +360,28 @@ async function processExcelFile(filePath) {
   }
 }
 
-// app.get("/hello", (req, res) => {
-//   if (req?.session?.isLoggedIn) {
-//     res.sendFile(path.join(__dirname, "public", "index.html"));
-//   } else {
-//     res.sendFile(path.join(__dirname, "public", "login.html"));
-//   }
-// });
-
+// All your existing routes remain the same...
 app.get("/logout-action", async (req, res) => {
   try {
-    // First, handle WhatsApp client cleanup
     if (client) {
       console.log("Cleaning up WhatsApp client on logout...");
       
       try {
-        // Stop any ongoing processes
         shouldStopClient = true;
         processingJob = false;
-        
-        // Reset client state
         isClientReady = false;
         latestQR = null;
-        
-        // Reset job status
         currentJobStatus = { total: 0, processed: 0, success: 0, failed: 0 };
         
-        // Properly destroy the client
         await client.destroy();
         console.log("WhatsApp client destroyed successfully");
-        
-        // Clear the client reference
         client = null;
         
       } catch (clientError) {
         console.error("Error cleaning up WhatsApp client:", clientError);
-        // Continue with logout even if client cleanup fails
       }
     }
     
-    // Then destroy the session
     req.session.destroy((err) => {
       if (err) {
         console.error("Session destruction error:", err);
@@ -368,7 +394,6 @@ app.get("/logout-action", async (req, res) => {
     
   } catch (error) {
     console.error("Logout error:", error);
-    // Force session destruction even if other cleanup fails
     req.session.destroy((err) => {
       if (err) {
         console.error("Force session destruction error:", err);
@@ -383,10 +408,10 @@ app.use("/static", requireAuth, express.static("public"));
 app.post("/login-action", (req, res) => {
   const { username, password } = req.body;
 
-  console.log("Login attempt:", username); // Debug log
+  console.log("Login attempt:", username);
 
-  const validUsername = "user";
-  const validPassword = "password123";
+  const validUsername = process.env.APP_USERNAME || "user";
+  const validPassword = process.env.APP_PASSWORD || "password123";
 
   if (username === validUsername && password === validPassword) {
     req.session.isLoggedIn = true;
@@ -436,7 +461,6 @@ app.post("/stop-client", requireAuth, (req, res) => {
 });
 
 app.post("/upload", requireAuth, upload.single("excelFile"), async (req, res) => {
-  // Your existing upload logic remains the same
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded" });
   }
@@ -479,9 +503,11 @@ app.get("/download-result", requireAuth, (req, res) => {
   if (processingJob) {
     return res.json({ processing: true });
   }
+  
   const resultFiles = fs
     .readdirSync(resultsDir)
     .filter((file) => file.endsWith(".xlsx"));
+    
   if (resultFiles.length > 0) {
     const latestFile = resultFiles
       .map((file) => ({
@@ -499,17 +525,6 @@ app.get("/download-result", requireAuth, (req, res) => {
 
   res.json({ processing: false, completed: false });
 });
-
-// app.use(session({
-//   secret: process.env.SESSION_SECRET || "your-secret-key",
-//   resave: false,
-//   saveUninitialized: false,
-//   cookie: {
-//     secure: process.env.NODE_ENV === 'production', // HTTPS in production
-//     maxAge: 24 * 60 * 60 * 1000,
-//     httpOnly: true
-//   },
-// }));
 
 app.get("/init-client", requireAuth, async (req, res) => {
   if (isClientReady) {
@@ -535,10 +550,16 @@ app.get("/init-client", requireAuth, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Access the WhatsApp Number Checker app in your browser`);
-  console.log(
-    `The QR code will appear on the web interface when you click "Initialize Client"`,
-  );
-});
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Access the WhatsApp Number Checker app in your browser`);
+    console.log(
+      `The QR code will appear on the web interface when you click "Initialize Client"`,
+    );
+  });
+}
+
+// Export for Vercel
+module.exports = app;
